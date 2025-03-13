@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>myTube - Video Upload & Library</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; text-align: center; background: #181818; color: white; }
+        .tabs { display: flex; justify-content: space-around; background: #202020; padding: 10px; }
+        .tab { cursor: pointer; padding: 10px; color: white; }
+        .tab:hover { background: #303030; }
+        .content { display: none; padding: 20px; }
+        .active { display: block; }
+        input, textarea, button { display: block; margin: 10px auto; padding: 10px; width: 80%; max-width: 400px; }
+        .video-list { list-style: none; padding: 0; }
+        .video-item { background: #252525; margin: 10px auto; padding: 10px; border-radius: 5px; position: relative; }
+        .video-actions { margin-top: 10px; }
+        button { cursor: pointer; background: red; color: white; border: none; padding: 8px 12px; margin: 5px; border-radius: 5px; }
+        button:hover { opacity: 0.8; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); align-items: center; justify-content: center; }
+        .modal video { max-width: 90%; max-height: 80vh; }
+        .close { position: absolute; top: 10px; right: 20px; font-size: 24px; cursor: pointer; color: white; }
+    </style>
+</head>
+<body>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <div class="tab" onclick="switchTab('uploadTab')">Upload</div>
+        <div class="tab" onclick="switchTab('libraryTab')">Library</div>
+    </div>
+
+    <!-- Upload Video Form -->
+    <div id="uploadTab" class="content active">
+        <h2>Upload Video</h2>
+        <input type="text" id="videoTitle" placeholder="Video Title">
+        <textarea id="videoDesc" placeholder="Video Description"></textarea>
+        <input type="text" id="videoTags" placeholder="Tags (comma-separated)">
+        <input type="file" id="videoFile" accept="video/*">
+        <button onclick="uploadVideo()">Upload & Save</button>
+    </div>
+
+    <!-- Video Library -->
+    <div id="libraryTab" class="content">
+        <h2>My Video Library</h2>
+        <input type="text" id="searchInput" placeholder="Search videos..." oninput="searchVideos()">
+        <ul id="videoLibrary" class="video-list"></ul>
+    </div>
+
+    <!-- Video Player Modal -->
+    <div id="videoModal" class="modal">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <video id="modalVideo" controls></video>
+    </div>
+
+    <script>
+        function switchTab(tabId) {
+            document.querySelectorAll('.content').forEach(tab => tab.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        let db;
+        const request = indexedDB.open("myTubeDB", 1);
+
+        request.onupgradeneeded = function(event) {
+            db = event.target.result;
+            if (!db.objectStoreNames.contains("videos")) {
+                db.createObjectStore("videos", { keyPath: "id", autoIncrement: true });
+            }
+        };
+
+        request.onsuccess = function(event) {
+            db = event.target.result;
+            loadVideos();
+        };
+
+        function uploadVideo() {
+            const title = document.getElementById("videoTitle").value;
+            const desc = document.getElementById("videoDesc").value;
+            const tags = document.getElementById("videoTags").value;
+            const fileInput = document.getElementById("videoFile");
+
+            if (!title || !fileInput.files.length) {
+                alert("Title and Video file are required!");
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(event) {
+                const videoData = { title, desc, tags, file: event.target.result };
+
+                const transaction = db.transaction(["videos"], "readwrite");
+                const store = transaction.objectStore("videos");
+                store.add(videoData);
+
+                transaction.oncomplete = function() {
+                    alert("Video uploaded and saved!");
+                    document.getElementById("videoTitle").value = "";
+                    document.getElementById("videoDesc").value = "";
+                    document.getElementById("videoTags").value = "";
+                    fileInput.value = "";
+                    loadVideos();
+                };
+            };
+
+            reader.readAsDataURL(file);
+        }
+
+        function loadVideos() {
+            const transaction = db.transaction(["videos"], "readonly");
+            const store = transaction.objectStore("videos");
+            const request = store.getAll();
+
+            request.onsuccess = function() {
+                const videos = request.result;
+                const videoLibrary = document.getElementById("videoLibrary");
+                videoLibrary.innerHTML = "";
+
+                videos.forEach(video => {
+                    const li = document.createElement("li");
+                    li.classList.add("video-item");
+                    li.innerHTML = `<strong>${video.title}</strong><br>${video.desc}<br>
+                        <small>Tags: ${video.tags}</small><br>
+                        <video controls src="${video.file}" style="width: 100%; max-width: 400px;"></video><br>
+                        <div class="video-actions">
+                            <button onclick="playVideo('${video.file}')">Play</button>
+                            <button onclick="deleteVideo(${video.id})">Delete</button>
+                            <button onclick="reportVideo(${video.id})">Report</button>
+                        </div>`;
+                    videoLibrary.appendChild(li);
+                });
+            };
+        }
+
+        function searchVideos() {
+            const query = document.getElementById("searchInput").value.toLowerCase();
+            const items = document.querySelectorAll(".video-item");
+
+            items.forEach(item => {
+                if (item.innerText.toLowerCase().includes(query)) {
+                    item.style.display = "block";
+                } else {
+                    item.style.display = "none";
+                }
+            });
+        }
+
+        function playVideo(src) {
+            document.getElementById("modalVideo").src = src;
+            document.getElementById("videoModal").style.display = "flex";
+        }
+
+        function closeModal() {
+            document.getElementById("videoModal").style.display = "none";
+            document.getElementById("modalVideo").pause();
+        }
+
+        function deleteVideo(id) {
+            const transaction = db.transaction(["videos"], "readwrite");
+            const store = transaction.objectStore("videos");
+            store.delete(id);
+
+            transaction.oncomplete = function() {
+                alert("Video deleted!");
+                loadVideos();
+            };
+        }
+
+        function reportVideo(id) {
+            if (confirm("Are you sure you want to report this video as inappropriate?")) {
+                deleteVideo(id);
+                alert("Video has been reported and removed!");
+            }
+        }
+    </script>
+
+</body>
+</html>
